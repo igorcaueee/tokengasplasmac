@@ -1,0 +1,363 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Totem de Autoatendimento</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: linear-gradient(135deg, #2C3E50, #4CA1AF);
+      color: #fff;
+      overflow: hidden;
+    }
+
+    .container {
+      width: 90%;
+      max-width: 1200px;
+      background-color: rgba(0, 0, 0, 0.6);
+      padding: 30px;
+      border-radius: 20px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: clamp(32px, 5vw, 64px);
+      margin-bottom: 20px;
+    }
+
+    h2 {
+      font-size: clamp(24px, 4vw, 48px);
+      margin-bottom: 10px;
+    }
+
+    .options {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 100%;
+      margin-top: 30px;
+    }
+
+    .option-button {
+      background-color: #3498db;
+      padding: 20px 60px;
+      border-radius: 15px;
+      font-size: clamp(24px, 3vw, 36px);
+      font-weight: bold;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s, transform 0.2s;
+      border: none;
+    }
+        .option-button-cancel {
+      background-color: #ce2d22;
+      padding: 20px 60px;
+      border-radius: 15px;
+      font-size: clamp(24px, 3vw, 36px);
+      font-weight: bold;
+      color: white;
+      cursor: pointer;
+      transition: background-color 0.3s, transform 0.2s;
+      border: none;
+    }
+
+    .option-button:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
+    }
+
+    .option-button:hover:enabled {
+      background-color: #2980b9;
+      transform: scale(1.05);
+    }
+        .option-button-cancel:hover:enabled {
+      background-color: #ce2d22;
+      transform: scale(1.05);
+    }
+ .hidden {
+            display: none;
+        }
+    .footer {
+      margin-top: 40px;
+      font-size: clamp(16px, 2vw, 24px);
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>Bem-vindo ao Autoatendimento</h2>
+    <h1>GásPuro</h1>
+    <div id="qrCodeContainer">
+  
+    </div>
+
+     <div id="cancelarBotao">
+      <br>
+    <button class="option-button-cancel" id="cancelar_pix">CANCELAR</button>
+    </div>
+    <div class="options" id="options-container">
+       <button class="option-button" id="iniciar" disabled>INICIAR</button>
+    </div>
+        <div id="novosBotoes" class="hidden">
+        <button class="option-button" id="pix">PIX</button>
+        <button class="option-button" id="debito">Débito</button>
+        <button class="option-button" id="credito">Crédito</button>
+    </div>
+    <div class="footer">Aguardando comunicação com Interface de Pagamento...</div>
+  </div>
+
+ <script>
+  const { ipcRenderer } = require('electron');
+  const { v4: uuidv4 } = require('uuid');
+  require('dotenv').config();
+
+  const botaoIniciar = document.getElementById('iniciar');
+   const botaoPix = document.getElementById('pix');
+      const cancelarBotaoPix = document.getElementById('cancelarBotao');
+     const qrcodePix = document.getElementById('qrCodeContainer');
+    // const cancelQrcodePix = document.getElementById('cancelQrCodeContainer');
+    const botaoDebito = document.getElementById('debito');
+     const botaoCredito = document.getElementById('credito');
+   const optionsContainer = document.getElementById('options-container');
+
+       cancelarBotaoPix.classList.add("hidden");
+
+  let messageTimeout = 0;
+  let token = process.env.TOKEN; //CLIENTE
+  let pos = process.env.POS; //CLIENTE
+  let url = `https://api.mercadopago.com/point/integration-api/devices/${pos}/payment-intents`;
+  let urlPix = `https://api.mercadopago.com/v1/payments`;
+//  let value = 11800;
+  let value = 100;
+
+  function resetTimeout() {
+    clearTimeout(messageTimeout);
+    console.log("🟢 Timer reiniciado.");
+    messageTimeout = setTimeout(handleTimeout, 10000);
+  }
+
+  // Evento de clique para publicar mensagem MQTT
+  botaoIniciar.addEventListener('click', () => {
+    ipcRenderer.send('mqtt-publish', 'central/1', 'INICIA');
+  });
+
+    cancelarBotaoPix.addEventListener('click', () => {
+    ipcRenderer.send('mqtt-publish', 'central/1', 'Cancelando cobrança ....');
+  });
+
+     botaoPix.addEventListener('click', () => {
+    ipcRenderer.send('mqtt-publish', 'central/1', 'PIX');
+  });
+
+    botaoDebito.addEventListener('click', () => {
+    ipcRenderer.send('mqtt-publish', 'central/1', 'DEBITO');
+  });
+
+    botaoCredito.addEventListener('click', () => {
+    ipcRenderer.send('mqtt-publish', 'central/1', 'CREDITO');
+  });
+
+    function handleTimeout() {
+      //DISPARAR ALGUM SCRIPT DE RECONEXAO
+      botaoIniciar.disabled = true;
+      document.querySelector('.footer').innerText = "Comunicação com Interface de Pagamento Perdida\nTentando Reconectar, Por Favor, aguarde ...";
+  }
+
+  // Evento para processar mensagens MQTT recebidas
+  ipcRenderer.on('mqtt-message', async (event, message) => {
+    console.log("Mensagem recebida:", message);
+    resetTimeout();
+    
+    // Se receber "INICIAR", habilita o botão
+    if (message.trim() === "INICIAR") {
+             cancelarBotaoPix.classList.add("hidden");
+           botaoIniciar.style.display = "block"; // Mostra o botão principal
+        novosBotoes.classList.add("hidden"); // Esconde os novos botões
+         qrcodePix.classList.add("hidden"); // Esconde qrcode
+      botaoIniciar.disabled = false;
+      botaoIniciar.innerText = message;
+      document.querySelector('.footer').innerText = "Toque em INICIAR para começar";
+    }
+
+    if (message.includes("Escolha")) {
+             cancelarBotaoPix.classList.add("hidden");
+       qrcodePix.classList.add("hidden");
+      document.querySelector('.footer').innerText = message;
+  document.getElementById("iniciar").style.display = "none"; // Esconde o botão principal
+            document.getElementById("novosBotoes").classList.remove("hidden"); // Mostra os novos botões
+  }
+
+
+
+    // Se receber uma dessas palavras, desabilita o botão
+    if (/Cancelando|Expirado|Botijão|Central|Aguardando|porta/.test(message)) {
+       qrcodePix.classList.add("hidden");
+      cancelarBotaoPix.classList.add("hidden");
+         if (message.includes("Aguardando")) {
+         cancelarBotaoPix.classList.remove("hidden");
+         }
+
+      if (message.includes("QRCode")) {
+        console.log('mostra qrcode*******')
+        qrcodePix.classList.remove("hidden");
+          
+      } 
+      botaoIniciar.style.display = "block"; // Mostra o botão principal
+      novosBotoes.classList.add("hidden"); // Esconde os novos botões
+      botaoIniciar.disabled = true;
+      botaoIniciar.innerText = message;
+      document.querySelector('.footer').innerText = "";
+    }
+
+    // Gera a cobranca a partir do metodo de pagamento e faz a requisição à API
+        if (message.includes("DEBITO")) {
+      console.log('debito aquii')
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: 
+
+             //##DEBITO
+          `{"amount":  ${value},"description":"Botijão",   "payment": {"type": "debit_card"},"additional_info":{"external_reference":"Totem Puro Gás","print_on_terminal":false}}`});
+
+        if (!response.ok) throw new Error("Erro ao chamar a API");
+
+        const data = await response.json();
+        if (data.id) {
+      localStorage.setItem("payment_id", data.id); // 🔥 Salva o ID no localStorage
+      console.log("ID salvo no storage:", data.id);
+    }
+        console.log("Resposta da API:", data);
+        console.log("ID ---> ", data.id);
+      } catch (error) {
+        console.error("Erro na requisição:", error);
+      }
+    }
+
+
+    if (message.includes("CREDITO")) {
+      console.log('credito aquii')
+      try {
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: 
+
+          //##CREDITO
+          `{"amount":  ${value},"description":"Botijão",   "payment": { "installments":1,"installments_cost":"buyer", "type": "credit_card"},"additional_info":{"external_reference":"Totem Puro Gás","print_on_terminal":false}}`});
+ 
+        if (!response.ok) throw new Error("Erro ao chamar a API");
+
+        const data = await response.json();
+        if (data.id) {
+      localStorage.setItem("payment_id", data.id); // 🔥 Salva o ID no localStorage
+      console.log("ID salvo no storage:", data.id);
+    }
+        console.log("Resposta da API:", data);
+        console.log("ID ---> ", data.id);
+      } catch (error) {
+        console.error("Erro na requisição:", error);
+      }
+    }
+
+        if (message.includes("PIX")) {
+      console.log('pix aqui')
+      try {
+        const response = await fetch(urlPix, {
+          method: "POST",
+          headers: { "X-Idempotency-Key": uuidv4(), "Content-Type": "application/json", "Accept": "application/json", Authorization: `Bearer ${token}` },
+          body: 
+
+         `{"transaction_amount": ${value/100}, "description": "Botijão", "payment_method_id": "pix","payer": {"email": "totem@totem.purogas.br"}}`});        
+
+        if (!response.ok) throw new Error("Erro ao chamar a API");
+
+        const data = await response.json();
+        if (data.id) {
+      localStorage.setItem("payment_id", data.id); // 🔥 Salva o ID no localStorage
+      console.log("ID salvo no storage:", data.id);
+    }
+        console.log("Resposta da API:", data);
+        console.log("ID ---> ", data.id);
+
+        // Pegando o valor do QR Code base64
+    const qrCodeBase64 = data.point_of_interaction.transaction_data.qr_code_base64;
+    
+    if (qrCodeBase64) {
+      // Renderizar na tela
+      const imgElement = document.createElement("img");
+      imgElement.src = `data:image/png;base64,${qrCodeBase64}`;
+      imgElement.alt = "QR Code PIX";
+      imgElement.style.width = "200px"; // Ajuste o tamanho conforme necessário
+      
+      document.getElementById("qrCodeContainer").innerHTML = ""; // Limpa antes de adicionar um novo QR Code
+      document.getElementById("qrCodeContainer").appendChild(imgElement);
+    }
+
+      } catch (error) {
+        console.error("Erro na requisição:", error);
+      }
+    }
+
+     // Se receber "Cancelando", faz a requisição de cancelamento à API
+    if (message.includes("Cancelando")) {
+        cancelarBotaoPix.classList.add("hidden");
+      const savedId = localStorage.getItem("payment_id"); // Recupera o ID salvo
+  if (!savedId) {
+    console.error("Nenhum ID de pagamento encontrado no storage.");
+    return;
+  }
+      try {
+        const response = await fetch(`${url}/${savedId}`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+        });
+
+        if (!response.ok) throw new Error("Erro ao chamar a API");
+
+        const data = await response.json();
+        console.log("Resposta da API:", data);
+         localStorage.removeItem("payment_id");
+
+      } catch (error) {
+        console.error("Erro na requisição:", error);
+      }
+    };
+
+
+  });
+
+    
+  ipcRenderer.on('webhook-message', (event, data) => {
+    console.log("Mensagem do Webhook recebida:", data);
+
+    if (data.mensagem.includes("Gerando")) {
+        console.log("Mensagem contém 'Gerando', processando requisição...");
+    }
+
+    document.querySelector('.footer').innerText = `Webhook recebido: ${data.mensagem}`;
+});
+
+</script>
+
+</body>
+</html>
