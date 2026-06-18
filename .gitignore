@@ -51,6 +51,26 @@ Thumbs.db
 
 venv/
 myenv/
+yolo-env/
 __pycache__/
 *.pyc
 .env
+
+# Modelos e artefatos pesados
+*.pt
+gemini_payload.json
+
+# Imagens geradas / de teste
+foto_capturada_*.jpg
+Simulacao_Andar*.jpg
+
+# Logs e temporarios de editor
+totem_boot_log.txt
+*.swp
+*.save
+*.BKP
+
+# Downloads avulsos
+download
+download.*
+wget-log*
