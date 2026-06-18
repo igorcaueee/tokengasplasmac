@@ -326,7 +326,26 @@ def WriteMemory(byte, datatype, db, bit, valor):
      except Exception as e:
          print(f"Erro ao escrever na memoria do CLP: {e}")
 
-    
+
+def estoque_sem_cheios():
+     """Le a grade de slots no DB7 (30 chars ASCII, 3 andares x 10:
+     V = vazio, S = sem botijao, C = cheio) e retorna True quando NAO ha
+     nenhum botijao cheio em toda a maquina (nenhum 'C' = byte 67).
+
+     Em caso de CLP desconectado ou falha de leitura retorna False
+     (fail-open: uma falha transitoria nao deve travar a maquina)."""
+     global Central_Gas
+     if not Conexao_Estabelecida_CLP or Central_Gas is None:
+         print("Erro: CLP nao conectado!")
+         return False
+     try:
+         slots = bytes(Central_Gas.read_area(areas['DB'], 7, 0, 30))
+         return slots.count(67) == 0  # 67 = 'C' (cheio)
+     except Exception as e:
+         print(f"Erro ao ler estoque (DB7): {e}")
+         return False
+
+
 conectar_clp()
 
 while True:
@@ -348,8 +367,12 @@ while True:
         print(f"{Passo}")
 
         if Passo == 1:
-             client.publish(f"central/1", "INICIAR")
-             print("INICIAR")
+             if estoque_sem_cheios():
+                  client.publish(f"central/1", "SEM_ESTOQUE")
+                  print("SEM_ESTOQUE - nenhum botijao cheio disponivel")
+             else:
+                  client.publish(f"central/1", "INICIAR")
+                  print("INICIAR")
              continue
 
         if  Passo == 3:

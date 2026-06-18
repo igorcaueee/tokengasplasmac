@@ -78,8 +78,13 @@ class FakeCLP:
 
     def __init__(self):
         self.lock = threading.RLock()
-        self.db = {2: bytearray(32), 4: bytearray(32)}
+        # DB7 = grade de slots (30 chars ASCII V/S/C); default = estoque cheio
+        self.db = {2: bytearray(32), 4: bytearray(32), 7: bytearray(b'C' * 30)}
         self.latch = set()  # conjunto de (db, byte, bit) que já foram para 1
+
+    def get_slots(self):
+        with self.lock:
+            return bytes(self.db[7])
 
     def get_word(self, db, byte):
         with self.lock:
@@ -527,6 +532,19 @@ def WriteMemory(byte, datatype, db, bit, valor):
         print(f"Erro ao escrever na memoria do CLP: {e}")
 
 
+def estoque_sem_cheios():
+    """Espelha a produção: True quando NÃO há nenhum botijão cheio ('C') nos 30
+    slots do DB7. Fail-open (False) se o CLP não estiver disponível."""
+    if not Conexao_Estabelecida_CLP or CLP is None:
+        print("Erro: CLP nao conectado!")
+        return False
+    try:
+        return CLP.get_slots().count(67) == 0  # 67 = 'C' (cheio)
+    except Exception as e:
+        print(f"Erro ao ler estoque (DB7): {e}")
+        return False
+
+
 # =====================================================================================
 # ===  SIM: GRAVAÇÃO DE SEQUÊNCIA + VEREDITO  ========================================
 # =====================================================================================
@@ -612,8 +630,12 @@ def orchestrator_loop(cenario):
         print(f"{Passo}")
 
         if Passo == 1:
-            client.publish(f"central/1", "INICIAR")
-            print("INICIAR")
+            if estoque_sem_cheios():
+                client.publish(f"central/1", "SEM_ESTOQUE")
+                print("SEM_ESTOQUE - nenhum botijao cheio disponivel")
+            else:
+                client.publish(f"central/1", "INICIAR")
+                print("INICIAR")
             continue
 
         if Passo == 3:

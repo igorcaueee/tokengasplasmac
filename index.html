@@ -195,6 +195,19 @@
       document.querySelector('.footer').innerText = "Toque em INICIAR para começar";
     }
 
+    // Sem nenhum botijão cheio em estoque: bloqueia o início e avisa o cliente
+    if (message.trim() === "SEM_ESTOQUE") {
+      cancelarBotaoPix.classList.add("hidden");
+      novosBotoes.classList.add("hidden");
+      qrcodePix.classList.add("hidden");
+      botaoIniciar.style.display = "block";
+      botaoIniciar.disabled = true;
+      botaoIniciar.innerText = "FORA DE SERVIÇO";
+      document.querySelector('.footer').innerText =
+        "Máquina temporariamente sem botijões disponíveis.\nProcure o atendente.";
+      return;
+    }
+
     if (message.includes("Escolha")) {
              cancelarBotaoPix.classList.add("hidden");
        qrcodePix.classList.add("hidden");
