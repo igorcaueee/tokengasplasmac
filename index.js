@@ -58,7 +58,7 @@ const normalizeResponse = (data) => {
 const requestGeminiAPI = async (base64Image, mimetype) => {
   const options = {
     method: "POST",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent",
+    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
     params: { key: process.env.KEY },
     headers: { "Content-Type": "application/json" },
     data: {
