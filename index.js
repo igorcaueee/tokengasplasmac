@@ -57,55 +57,6 @@ const normalizeResponse = (data) => {
 
 const BOTIJAO_PROMPT = "Atue como um sistema de visão computacional industrial de alta precisão para checkout da Liquigás. Sua tarefa é validar EXCLUSIVAMENTE botijões de gás de cozinha padrão P13 (13kg) ou P45 (45kg). \n CONTEXTO VISUAL: \n O botijão estará dentro de um cesto/grade metálica de transporte. Use as dimensões do cesto como referência de escala. \n REGRAS DE CLASSIFICAÇÃO: \n 1. CRITÉRIOS DE ACEITE (status: \"True\"): \n - Deve ser um botijão P13 ou P45 REAL. \n - O P13 deve ocupar quase toda a largura do cesto central (preenchimento lateral robusto). \n - Presença de aro superior (alça) de proteção largo e soldado, proporcional ao corpo cilíndrico. \n - Textura metálica com marcas de uso, pintura (azul, cinza/prateado ou amarelo) e desgaste real. \n 2. CRITÉRIOS DE REJEIÇÃO OBRIGATÓRIA (status: \"False\"): \n - LIQUINHO (P2/P5): Rejeite botijões pequenos. Identifique-os se houver muito espaço vazio nas laterais ou no topo do cesto. O Liquinho é visivelmente mais baixo e \"fino\" que o P13. \n - ACESSÓRIOS DE CAMPING: Se o botijão tiver um fogareiro ou bocal direto de rosca fina (comum em P2), rejeite. \n - SABOTAGEM: Brinquedos, miniaturas, fotos de botijões, desenhos ou cestos vazios. \n - OBSTRUÇÃO TOTAL: Se não for possível confirmar o tamanho P13 devido a obstruções severas. \n INSTRUÇÃO DE SAÍDA: \n Retorne estritamente um JSON PURO no formato: {\"status\": \"True\"} para P13/P45 ou {\"status\": \"False\"} para Liquinhos ou outros objetos. Não adicione explicações.";
 
-// Função para fazer a requisição ao Google Gemini
-const requestGeminiAPI = async (base64Image, mimetype) => {
-  const options = {
-    method: "POST",
-    url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent",
-    params: { key: process.env.KEY },
-    headers: { "Content-Type": "application/json" },
-    data: {
-      generationConfig: {
-        temperature: 0.0,
-        topK: 1,
-        topP: 0.95,
-        maxOutputTokens: 1024,
-      },
-      safetySettings: [
-        { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_ONLY_HIGH" },
-        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_ONLY_HIGH" },
-        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_ONLY_HIGH" },
-        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_ONLY_HIGH" },
-      ],
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: BOTIJAO_PROMPT
-            },
-            { text: "Object: " },
-            {
-              inlineData: {
-                mimeType: mimetype,
-                data: base64Image,
-              },
-            },
-          ],
-        },
-      ],
-    },
-  };
-
-  const response = await axios.request(options);
-
-  // Extrai o conteúdo da resposta
-  const text = response.data.candidates[0]?.content?.parts[0]?.text || "{}";
-  const jsonText = text.replace("```json\n", "").replace("```", "");
-
-  return JSON.parse(jsonText);
-};
-
 const requestOpenRouterAPI = async (base64Image, mimetype, model) => {
   const response = await axios.post(
     'https://openrouter.ai/api/v1/chat/completions',
@@ -160,27 +111,29 @@ const sendFailureEmail = async (erros) => {
     const erros = [];
     let apiResponse;
 
-    // Tentativa 1: Gemini
+    const orModel1 = process.env.OPENROUTER_MODEL_1 || 'nvidia/nemotron-nano-12b-v2-vl:free';
+    const orModel2 = process.env.OPENROUTER_MODEL_2 || 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free';
+    const orModel3 = process.env.OPENROUTER_MODEL_3 || 'google/gemma-4-31b-it:free';
+
+    // Tentativa 1: OpenRouter modelo 1
     try {
-      apiResponse = await requestGeminiAPI(base64Image, req.file.mimetype);
+      apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel1);
     } catch (e1) {
-      erros.push(`Gemini: ${e1.message}`);
-      console.error('[IA] Gemini falhou, tentando OpenRouter llama-4-scout...');
+      erros.push(`OpenRouter ${orModel1}: ${e1.message}`);
+      console.error(`[IA] ${orModel1} falhou, tentando ${orModel2}...`);
 
-      // Tentativa 2: OpenRouter modelo 1
-      const orModel1 = process.env.OPENROUTER_MODEL_1 || 'nvidia/nemotron-nano-12b-v2-vl:free';
+      // Tentativa 2: OpenRouter modelo 2
       try {
-        apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel1);
+        apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel2);
       } catch (e2) {
-        erros.push(`OpenRouter ${orModel1}: ${e2.message}`);
-        console.error(`[IA] ${orModel1} falhou, tentando modelo 2...`);
+        erros.push(`OpenRouter ${orModel2}: ${e2.message}`);
+        console.error(`[IA] ${orModel2} falhou, tentando ${orModel3}...`);
 
-        // Tentativa 3: OpenRouter modelo 2
-        const orModel2 = process.env.OPENROUTER_MODEL_2 || 'google/gemma-4-31b-it:free';
+        // Tentativa 3: OpenRouter modelo 3
         try {
-          apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel2);
+          apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel3);
         } catch (e3) {
-          erros.push(`OpenRouter ${orModel2}: ${e3.message}`);
+          erros.push(`OpenRouter ${orModel3}: ${e3.message}`);
           console.error('[IA] Todas as APIs falharam. Enviando e-mail de alerta...');
           sendFailureEmail(erros).catch(emailErr =>
             console.error('[IA] Falha ao enviar e-mail de alerta:', emailErr.message)
