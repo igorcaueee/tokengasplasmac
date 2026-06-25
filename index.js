@@ -168,7 +168,7 @@ const sendFailureEmail = async (erros) => {
       console.error('[IA] Gemini falhou, tentando OpenRouter llama-4-scout...');
 
       // Tentativa 2: OpenRouter modelo 1
-      const orModel1 = process.env.OPENROUTER_MODEL_1 || 'meta-llama/llama-3.2-11b-vision-instruct:free';
+      const orModel1 = process.env.OPENROUTER_MODEL_1 || 'nvidia/nemotron-nano-12b-v2-vl:free';
       try {
         apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel1);
       } catch (e2) {
@@ -176,7 +176,7 @@ const sendFailureEmail = async (erros) => {
         console.error(`[IA] ${orModel1} falhou, tentando modelo 2...`);
 
         // Tentativa 3: OpenRouter modelo 2
-        const orModel2 = process.env.OPENROUTER_MODEL_2 || 'qwen/qwen2.5-vl-7b-instruct:free';
+        const orModel2 = process.env.OPENROUTER_MODEL_2 || 'google/gemma-4-31b-it:free';
         try {
           apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel2);
         } catch (e3) {
