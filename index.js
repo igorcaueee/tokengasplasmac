@@ -167,18 +167,20 @@ const sendFailureEmail = async (erros) => {
       erros.push(`Gemini: ${e1.message}`);
       console.error('[IA] Gemini falhou, tentando OpenRouter llama-4-scout...');
 
-      // Tentativa 2: OpenRouter llama-4-scout
+      // Tentativa 2: OpenRouter modelo 1
+      const orModel1 = process.env.OPENROUTER_MODEL_1 || 'meta-llama/llama-3.2-11b-vision-instruct:free';
       try {
-        apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, 'meta-llama/llama-4-scout:free');
+        apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel1);
       } catch (e2) {
-        erros.push(`OpenRouter llama-4-scout: ${e2.message}`);
-        console.error('[IA] llama-4-scout falhou, tentando qwen2.5-vl...');
+        erros.push(`OpenRouter ${orModel1}: ${e2.message}`);
+        console.error(`[IA] ${orModel1} falhou, tentando modelo 2...`);
 
-        // Tentativa 3: OpenRouter qwen2.5-vl
+        // Tentativa 3: OpenRouter modelo 2
+        const orModel2 = process.env.OPENROUTER_MODEL_2 || 'qwen/qwen2.5-vl-7b-instruct:free';
         try {
-          apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, 'qwen/qwen2.5-vl-72b-instruct:free');
+          apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, orModel2);
         } catch (e3) {
-          erros.push(`OpenRouter qwen2.5-vl: ${e3.message}`);
+          erros.push(`OpenRouter ${orModel2}: ${e3.message}`);
           console.error('[IA] Todas as APIs falharam. Enviando e-mail de alerta...');
           sendFailureEmail(erros).catch(emailErr =>
             console.error('[IA] Falha ao enviar e-mail de alerta:', emailErr.message)
