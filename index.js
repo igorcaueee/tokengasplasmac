@@ -7,6 +7,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
+const nodemailer = require('nodemailer');
 const PORT = 3000;
 
 const storage = multer.memoryStorage();
@@ -54,6 +55,8 @@ const normalizeResponse = (data) => {
   };
 };
 
+const BOTIJAO_PROMPT = "Atue como um sistema de visão computacional industrial de alta precisão para checkout da Liquigás. Sua tarefa é validar EXCLUSIVAMENTE botijões de gás de cozinha padrão P13 (13kg) ou P45 (45kg). \n CONTEXTO VISUAL: \n O botijão estará dentro de um cesto/grade metálica de transporte. Use as dimensões do cesto como referência de escala. \n REGRAS DE CLASSIFICAÇÃO: \n 1. CRITÉRIOS DE ACEITE (status: \"True\"): \n - Deve ser um botijão P13 ou P45 REAL. \n - O P13 deve ocupar quase toda a largura do cesto central (preenchimento lateral robusto). \n - Presença de aro superior (alça) de proteção largo e soldado, proporcional ao corpo cilíndrico. \n - Textura metálica com marcas de uso, pintura (azul, cinza/prateado ou amarelo) e desgaste real. \n 2. CRITÉRIOS DE REJEIÇÃO OBRIGATÓRIA (status: \"False\"): \n - LIQUINHO (P2/P5): Rejeite botijões pequenos. Identifique-os se houver muito espaço vazio nas laterais ou no topo do cesto. O Liquinho é visivelmente mais baixo e \"fino\" que o P13. \n - ACESSÓRIOS DE CAMPING: Se o botijão tiver um fogareiro ou bocal direto de rosca fina (comum em P2), rejeite. \n - SABOTAGEM: Brinquedos, miniaturas, fotos de botijões, desenhos ou cestos vazios. \n - OBSTRUÇÃO TOTAL: Se não for possível confirmar o tamanho P13 devido a obstruções severas. \n INSTRUÇÃO DE SAÍDA: \n Retorne estritamente um JSON PURO no formato: {\"status\": \"True\"} para P13/P45 ou {\"status\": \"False\"} para Liquinhos ou outros objetos. Não adicione explicações.";
+
 // Função para fazer a requisição ao Google Gemini
 const requestGeminiAPI = async (base64Image, mimetype) => {
   const options = {
@@ -79,7 +82,7 @@ const requestGeminiAPI = async (base64Image, mimetype) => {
           role: "user",
           parts: [
             {
-              text: "Atue como um sistema de visão computacional industrial de alta precisão para checkout da Liquigás. Sua tarefa é validar EXCLUSIVAMENTE botijões de gás de cozinha padrão P13 (13kg) ou P45 (45kg). \n CONTEXTO VISUAL: \n O botijão estará dentro de um cesto/grade metálica de transporte. Use as dimensões do cesto como referência de escala. \n REGRAS DE CLASSIFICAÇÃO: \n 1. CRITÉRIOS DE ACEITE (status: \"True\"): \n - Deve ser um botijão P13 ou P45 REAL. \n - O P13 deve ocupar quase toda a largura do cesto central (preenchimento lateral robusto). \n - Presença de aro superior (alça) de proteção largo e soldado, proporcional ao corpo cilíndrico. \n - Textura metálica com marcas de uso, pintura (azul, cinza/prateado ou amarelo) e desgaste real. \n 2. CRITÉRIOS DE REJEIÇÃO OBRIGATÓRIA (status: \"False\"): \n - LIQUINHO (P2/P5): Rejeite botijões pequenos. Identifique-os se houver muito espaço vazio nas laterais ou no topo do cesto. O Liquinho é visivelmente mais baixo e \"fino\" que o P13. \n - ACESSÓRIOS DE CAMPING: Se o botijão tiver um fogareiro ou bocal direto de rosca fina (comum em P2), rejeite. \n - SABOTAGEM: Brinquedos, miniaturas, fotos de botijões, desenhos ou cestos vazios. \n - OBSTRUÇÃO TOTAL: Se não for possível confirmar o tamanho P13 devido a obstruções severas. \n INSTRUÇÃO DE SAÍDA: \n Retorne estritamente um JSON PURO no formato: {\"status\": \"True\"} para P13/P45 ou {\"status\": \"False\"} para Liquinhos ou outros objetos. Não adicione explicações."
+              text: BOTIJAO_PROMPT
             },
             { text: "Object: " },
             {
@@ -103,6 +106,47 @@ const requestGeminiAPI = async (base64Image, mimetype) => {
   return JSON.parse(jsonText);
 };
 
+const requestOpenRouterAPI = async (base64Image, mimetype, model) => {
+  const response = await axios.post(
+    'https://openrouter.ai/api/v1/chat/completions',
+    {
+      model,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: BOTIJAO_PROMPT },
+          { type: 'image_url', image_url: { url: `data:${mimetype};base64,${base64Image}` } }
+        ]
+      }],
+      temperature: 0.0,
+      max_tokens: 256,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000,
+    }
+  );
+  const text = response.data.choices[0]?.message?.content || '{}';
+  const jsonText = text.replace(/```json\n?/g, '').replace(/```/g, '').trim();
+  return JSON.parse(jsonText);
+};
+
+const sendFailureEmail = async (erros) => {
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+  });
+  await transporter.sendMail({
+    from: process.env.EMAIL_USER,
+    to: process.env.EMAIL_TO,
+    subject: '[GásPuro Totem] Falha total na validação de IA',
+    text: `Todas as APIs de visão falharam em ${new Date().toISOString()}.\n\nErros:\n${erros.map((e, i) => `${i + 1}. ${e}`).join('\n')}`,
+  });
+};
+
     try {
     if (!req.file) {
       client.publish(topic, "Erro de captura.\nNenhuma imagem capturada", { qos: 1 });
@@ -113,20 +157,45 @@ const requestGeminiAPI = async (base64Image, mimetype) => {
     const base64Image = req.file.buffer.toString("base64");
 
     let parsedJson;
+    const erros = [];
+    let apiResponse;
 
-    // Faz a requisição para o Google Gemini
-       const response = await requestGeminiAPI(base64Image, req.file.mimetype);
-	client.publish(topic, `resposta da api do gemini ${response}`);
+    // Tentativa 1: Gemini
+    try {
+      apiResponse = await requestGeminiAPI(base64Image, req.file.mimetype);
+    } catch (e1) {
+      erros.push(`Gemini: ${e1.message}`);
+      console.error('[IA] Gemini falhou, tentando OpenRouter llama-4-scout...');
 
-    //   // Normaliza os dados
-       parsedJson = normalizeResponse(response);
+      // Tentativa 2: OpenRouter llama-4-scout
+      try {
+        apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, 'meta-llama/llama-4-scout:free');
+      } catch (e2) {
+        erros.push(`OpenRouter llama-4-scout: ${e2.message}`);
+        console.error('[IA] llama-4-scout falhou, tentando qwen2.5-vl...');
 
-      if (parsedJson.status === "True" || parsedJson.status === "False") {
-        return res.json(parsedJson);
+        // Tentativa 3: OpenRouter qwen2.5-vl
+        try {
+          apiResponse = await requestOpenRouterAPI(base64Image, req.file.mimetype, 'qwen/qwen2.5-vl-72b-instruct:free');
+        } catch (e3) {
+          erros.push(`OpenRouter qwen2.5-vl: ${e3.message}`);
+          console.error('[IA] Todas as APIs falharam. Enviando e-mail de alerta...');
+          sendFailureEmail(erros).catch(emailErr =>
+            console.error('[IA] Falha ao enviar e-mail de alerta:', emailErr.message)
+          );
+          client.publish(topic, 'Erro de conexão.\nTodas as APIs de validação falharam. Equipe técnica notificada.', { qos: 1 });
+          return res.status(500).json({ error: 'Todas as APIs de validação falharam. Equipe técnica notificada.' });
+        }
       }
+    }
 
+    parsedJson = normalizeResponse(apiResponse);
 
-    // Se todas as tentativas falharem, retorna erro
+    if (parsedJson.status === "True" || parsedJson.status === "False") {
+      return res.json(parsedJson);
+    }
+
+    // Resposta com status inválido
     client.publish(topic, "Erro de processamento de Imagem.\nNão foi possível processar a imagem corretamente", { qos: 1 });
     res.status(400).json({ error: "Erro de processamento de Imagem. Não foi possível processar a imagem corretamente." });
 
